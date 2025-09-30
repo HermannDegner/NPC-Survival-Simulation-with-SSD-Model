@@ -1,0 +1,5 @@
+{
+  "name": "NPC Survival Simulation with SSD Model",
+  "description": "An interactive web application that visualizes a complex agent-based survival simulation. It models Non-Player Characters (NPCs) with a mathematical framework for decision-making, tracking their physiological and psychological states over time.",
+  "requestFramePermissions": []
+}
