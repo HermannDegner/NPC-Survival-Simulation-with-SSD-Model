@@ -1,86 +1,63 @@
 import React from 'react';
-import type { NPCState, Position } from '../types';
-
-interface BerryState {
-    x: number;
-    y: number;
-    abundance: number;
-}
-interface HuntZoneState {
-    x: number;
-y: number;
-    isUnsafe: boolean;
-}
+import type { NPCState, Berry, HuntZone } from '../types';
+import { ENV_SIZE } from '../constants';
 
 interface SimulationMapProps {
-    size: number;
     npcs: NPCState[];
-    berries: BerryState[];
-    huntZones: HuntZoneState[];
+    berries: Record<string, Berry>;
+    huntZones: Record<string, HuntZone>;
 }
 
-const NpcIcon: React.FC<{ npc: NPCState }> = ({ npc }) => (
-    <div className={`absolute w-3 h-3 rounded-full flex items-center justify-center border-2 border-gray-800 ${npc.alive ? '' : 'grayscale'}`} style={{
-        left: `${(npc.x / 26) * 100}%`,
-        top: `${(npc.y / 26) * 100}%`,
-        transform: 'translate(-50%, -50%)',
-        transition: 'left 0.2s linear, top 0.2s linear',
-    }}>
-        <span className={`${npc.preset.color} font-bold text-xs`}>{npc.name.charAt(npc.name.length-1)}</span>
-    </div>
-);
+const NPC_ICON_MAP: { [key: string]: string } = {
+    "Forager_A": "A",
+    "Tracker_B": "B",
+    "Pioneer_C": "C",
+    "Guardian_D": "D",
+    "Scavenger_E": "E",
+};
 
+const SimulationMap: React.FC<SimulationMapProps> = ({ npcs, berries, huntZones }) => {
+    
+    const posToString = (x: number, y: number) => `${x},${y}`;
 
-const SimulationMap: React.FC<SimulationMapProps> = ({ size, npcs, berries, huntZones }) => {
-    const DEPLETION_THRESHOLD = 0.1;
     return (
         <div className="bg-gray-800 p-4 rounded-lg shadow-lg">
-            <h2 className="text-xl font-bold mb-2 text-cyan-300">Environment Map</h2>
-            <div className="relative aspect-square bg-gray-700/50 rounded-md overflow-hidden border-2 border-gray-700">
-                {/* Grid Lines */}
-                <div className="absolute inset-0 grid grid-cols-13">
-                    {Array.from({ length: 12 }).map((_, i) => (
-                        <div key={`v-${i}`} className="border-r border-gray-600/50"></div>
-                    ))}
-                </div>
-                <div className="absolute inset-0 grid grid-rows-13">
-                     {Array.from({ length: 12 }).map((_, i) => (
-                        <div key={`h-${i}`} className="border-b border-gray-600/50"></div>
-                    ))}
-                </div>
-
-                {/* Berries */}
-                {berries.map((berry, i) => (
-                    <div key={`berry-${i}`} className="absolute w-2 h-2 bg-pink-500 rounded-full transition-opacity duration-300"
-                         style={{ 
-                             left: `${(berry.x / size) * 100}%`, 
-                             top: `${(berry.y / size) * 100}%`, 
-                             transform: 'translate(-50%, -50%)',
-                             opacity: berry.abundance < DEPLETION_THRESHOLD ? 0.3 : 1
-                          }}
-                    ></div>
-                ))}
-
-                {/* Hunt Zones */}
-                {huntZones.map((zone, i) => (
-                    <div key={`hunt-${i}`} className={`absolute w-3 h-3 border-2 transition-colors duration-300 ${zone.isUnsafe ? 'border-yellow-400' : 'border-red-500'}`}
-                         style={{ 
-                            left: `${(zone.x / size) * 100}%`, 
-                            top: `${(zone.y / size) * 100}%`, 
-                            transform: 'translate(-50%, -50%) rotate(45deg)' 
-                        }}
-                    ></div>
-                ))}
-                
-                {/* NPCs */}
-                {npcs.map(npc => (
-                    <NpcIcon key={npc.name} npc={npc} />
-                ))}
+             <h2 className="text-xl font-bold mb-3 text-cyan-300">Environment Map</h2>
+            <div className="grid border-gray-700 border-t border-l" style={{ gridTemplateColumns: `repeat(${ENV_SIZE}, minmax(0, 1fr))` }}>
+                {Array.from({ length: ENV_SIZE }, (_, y) =>
+                    Array.from({ length: ENV_SIZE }, (_, x) => {
+                        const key = `${x}-${y}`;
+                        const posKey = posToString(x,y);
+                        
+                        const npc = npcs.find(n => n.alive && n.x === x && n.y === y);
+                        const berry = berries[posKey];
+                        const huntZone = huntZones[posKey];
+                        
+                        let cellContent = null;
+                        if (npc) {
+                            cellContent = (
+                                <div title={npc.name} className={`w-full h-full flex items-center justify-center font-bold text-lg ${npc.preset.color}`}>
+                                    {NPC_ICON_MAP[npc.name]?.charAt(0) || '?'}
+                                </div>
+                            );
+                        } else if (berry) {
+                            cellContent = <div title="Berry Patch" className="w-3/5 h-3/5 bg-pink-500 rounded-full" style={{opacity: berry.abundance > 0.2 ? 1 : 0.3}}></div>;
+                        } else if (huntZone) {
+                             cellContent = <div title="Hunt Zone" className="w-4/5 h-4/5 border-2 border-red-500" style={{opacity: huntZone.population > 0.2 ? 1 : 0.3, borderColor: huntZone.unsafe_until > 0 ? 'yellow' : 'rgb(239 68 68)'}}></div>;
+                        }
+                        
+                        return (
+                            <div key={key} className="aspect-square bg-gray-900/50 border-r border-b border-gray-700 flex items-center justify-center">
+                                {cellContent}
+                            </div>
+                        );
+                    })
+                )}
             </div>
-             <div className="flex justify-around mt-2 text-xs text-gray-400">
-                <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-pink-500"></div> Berry (Dim=Depleted)</div>
-                <div className="flex items-center gap-1"><div className="w-2 h-2 border border-yellow-400 transform rotate-45"></div> Hunt (Yellow=Unsafe)</div>
-                <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full border border-gray-300"></div> NPC</div>
+             <div className="text-xs text-gray-400 mt-2 grid grid-cols-3 gap-x-2">
+                <div><span className="font-bold text-white">A-E</span> = NPC</div>
+                <div className="flex items-center"><div className="w-3 h-3 bg-pink-500 rounded-full mr-1.5"></div> Berry (Dim=Depleted)</div>
+                <div className="flex items-center"><div className="w-3 h-3 border-2 border-red-500 mr-1.5"></div> Hunt (Yellow=Unsafe)</div>
             </div>
         </div>
     );

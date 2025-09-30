@@ -47,3 +47,16 @@ export interface NPCState {
     preset: NPCPreset;
     kappa: { [key: string]: number };
 }
+
+export interface Berry {
+    abundance: number;
+    regen: number;
+}
+
+export interface HuntZone {
+    base_success: number;
+    danger: number;
+    population: number;
+    regen: number;
+    unsafe_until: number;
+}

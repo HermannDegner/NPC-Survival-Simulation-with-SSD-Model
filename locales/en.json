@@ -1,0 +1,62 @@
+{
+  "header": {
+    "title": "NPC Survival Simulation",
+    "subtitle": "Agent-Based Model with Subjective State Dynamics (SSD)"
+  },
+  "controls": {
+    "title": "Controls",
+    "start": "Start",
+    "pause": "Pause",
+    "reset": "Reset",
+    "speed": "Speed",
+    "progress": "Progress",
+    "tick": "Tick"
+  },
+  "map": {
+    "title": "Environment Map",
+    "legend_berry": "Berry (Dim=Depleted)",
+    "legend_hunt": "Hunt (Yellow=Unsafe)",
+    "legend_npc": "NPC"
+  },
+  "npcStatus": {
+    "title": "NPC Status",
+    "alive": "ALIVE",
+    "dead": "DEAD",
+    "hunger": "Hunger",
+    "fatigue": "Fatigue",
+    "injury": "Injury"
+  },
+  "charts": {
+    "hunger_title": "Hunger Over Time",
+    "hunger_y_label": "Hunger",
+    "e_title": "Heat Accumulation (E)",
+    "e_y_label": "Unprocessed Pressure (E)",
+    "t_title": "Exploration Temperature (T)",
+    "t_y_label": "Temperature (T)",
+    "kappa_forage_title": "Alignment Inertia (Forage)",
+    "kappa_forage_y_label": "κ (forage)",
+    "kappa_hunt_title": "Alignment Inertia (Hunt)",
+    "kappa_hunt_y_label": "κ (hunt)",
+    "death_threshold": "Death Threshold",
+    "time_axis": "Time"
+  },
+  "chart_toggle": {
+    "hunger": "HUNGER",
+    "e": "E",
+    "t": "T",
+    "kappa_forage": "KAPPA FORAGE",
+    "kappa_hunt": "KAPPA HUNT"
+  },
+  "eventLog": {
+    "title": "Event Log",
+    "empty": "No significant events yet...",
+    "tick_prefix": "T",
+    "death": " has died.",
+    "eat_success": " foraged for {{amount}} food.",
+    "eat_fail": " failed to forage for food.",
+    "hunt_success": " successfully hunted, gaining {{amount}} food.",
+    "hunt_fail": " failed to hunt and was possibly injured.",
+    "share_food": " shared food with {{target}}.",
+    "tend_wounds": " helped {{target}} recover."
+  }
+}

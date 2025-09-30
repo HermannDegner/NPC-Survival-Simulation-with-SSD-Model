@@ -6,6 +6,7 @@ interface EventLogProps {
 }
 
 const EventLog: React.FC<EventLogProps> = ({ logData }) => {
+
     const significantEvents = useMemo(() => {
         return logData
             .filter(log => !['patrol', 'sleep'].includes(log.action))
@@ -14,6 +15,8 @@ const EventLog: React.FC<EventLogProps> = ({ logData }) => {
     }, [logData]);
 
     const getEventMessage = (log: LogEntry) => {
+        const targetNode = log.target ? <span className="font-bold text-gray-300">{log.target}</span> : '';
+        
         switch (log.action) {
             case 'death':
                 return <><span className="font-bold text-red-400">{log.name}</span> has died.</>;
@@ -26,9 +29,20 @@ const EventLog: React.FC<EventLogProps> = ({ logData }) => {
             case 'hunt_fail':
                  return <><span className="font-bold text-orange-400">{log.name}</span> failed to hunt and was possibly injured.</>;
             case 'share_food':
-                return <><span className="font-bold text-lime-400">{log.name}</span> shared food with <span className="font-bold text-gray-300">{log.target}</span>.</>;
+                return <>
+                    <span className="font-bold text-lime-400">{log.name}</span>
+                    <> shared food with </>
+                    {targetNode}
+                    <>.
+                    </>
+                </>;
             case 'tend_wounds':
-                 return <><span className="font-bold text-sky-400">{log.name}</span> helped <span className="font-bold text-gray-300">{log.target}</span> recover.</>;
+                 return <>
+                    <span className="font-bold text-sky-400">{log.name}</span>
+                    <> helped </>
+                    {targetNode}
+                    <> recover.</>
+                 </>;
             default:
                 return `${log.name} ${log.action}`;
         }

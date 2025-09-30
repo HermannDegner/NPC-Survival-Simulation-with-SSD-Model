@@ -1,0 +1,62 @@
+{
+  "header": {
+    "title": "NPCサバイバルシミュレーション",
+    "subtitle": "主観的状態力学 (SSD) によるエージェントベースモデル"
+  },
+  "controls": {
+    "title": "コントロール",
+    "start": "開始",
+    "pause": "一時停止",
+    "reset": "リセット",
+    "speed": "速度",
+    "progress": "進行状況",
+    "tick": "ティック"
+  },
+  "map": {
+    "title": "環境マップ",
+    "legend_berry": "ベリー (薄=枯渇)",
+    "legend_hunt": "狩猟場 (黄=危険)",
+    "legend_npc": "NPC"
+  },
+  "npcStatus": {
+    "title": "NPCステータス",
+    "alive": "生存",
+    "dead": "死亡",
+    "hunger": "空腹",
+    "fatigue": "疲労",
+    "injury": "怪我"
+  },
+  "charts": {
+    "hunger_title": "空腹度の時間変化",
+    "hunger_y_label": "空腹度",
+    "e_title": "未処理圧力の蓄積 (E)",
+    "e_y_label": "未処理圧力 (E)",
+    "t_title": "探索温度 (T)",
+    "t_y_label": "温度 (T)",
+    "kappa_forage_title": "慣性 (採集)",
+    "kappa_forage_y_label": "κ (採集)",
+    "kappa_hunt_title": "慣性 (狩り)",
+    "kappa_hunt_y_label": "κ (狩り)",
+    "death_threshold": "死亡ライン",
+    "time_axis": "時間"
+  },
+  "chart_toggle": {
+    "hunger": "空腹度",
+    "e": "E",
+    "t": "T",
+    "kappa_forage": "採集κ",
+    "kappa_hunt": "狩りκ"
+  },
+  "eventLog": {
+    "title": "イベントログ",
+    "empty": "まだ重要なイベントはありません...",
+    "tick_prefix": "T",
+    "death": "は死亡しました。",
+    "eat_success": "は食料を{{amount}}採集しました。",
+    "eat_fail": "は食料の採集に失敗しました。",
+    "hunt_success": "は狩りに成功し、食料を{{amount}}得ました。",
+    "hunt_fail": "は狩りに失敗し、負傷した可能性があります。",
+    "share_food": "は{{target}}に食料を分け与えました。",
+    "tend_wounds": "は{{target}}の回復を手伝いました。"
+  }
+}
