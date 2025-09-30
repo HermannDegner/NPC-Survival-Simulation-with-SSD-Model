@@ -1,433 +1,346 @@
-import { NPC_PRESETS, ENV_SIZE } from '../constants';
-import type { NPCState, LogEntry, NPCPreset, Berry, HuntZone } from '../types';
+import { NPC_PRESETS, ENV_SIZE, DAY_LENGTH } from '../constants';
+import type { SimulationState, Environment, NPCState, LogEntry, DayNightState } from '../types';
 
-// Helper function for random numbers
-const randRange = (min: number, max: number) => Math.random() * (max - min) + min;
-const randInt = (min: number, max: number) => Math.floor(randRange(min, max));
+// --- Day/Night Cycle Logic ---
+const NIGHT_START_RATIO = 0.6;
+const NIGHT_END_RATIO = 0.9;
 
-// --- ENVIRONMENT CLASS ---
-class EnvScarce {
-    public berries: Record<string, Berry> = {};
-    public huntzones: Record<string, HuntZone> = {};
-    public t = 0;
-
-    constructor() {
-        this.reset();
-    }
-
-    reset() {
-        this.berries = {};
-        for (let i = 0; i < 6; i++) { // Increased berry count
-            const x = randInt(0, ENV_SIZE);
-            const y = randInt(0, ENV_SIZE);
-            this.berries[`${x},${y}`] = {
-                "abundance": randRange(0.6, 0.9), // Increased abundance
-                "regen": randRange(0.01, 0.02)      // Increased regen
-            };
-        }
-        this.huntzones = {};
-        for (let i = 0; i < 5; i++) {
-            const x = randInt(0, ENV_SIZE);
-            const y = randInt(0, ENV_SIZE);
-            this.huntzones[`${x},${y}`] = {
-                "base_success": randRange(0.25, 0.5),
-                "danger": randRange(0.2, 0.55),
-                "population": randRange(0.7, 1.0),
-                "regen": randRange(0.005, 0.015),
-                "unsafe_until": 0
-            };
-        }
-        this.t = 0;
-    }
+class DayNightCycle {
+    private tick: number = 0;
 
     step() {
-        for (const k in this.berries) {
-            const v = this.berries[k];
-            v.abundance = Math.min(1.0, v.abundance + v.regen * (1.0 - v.abundance));
-        }
-        for (const k in this.huntzones) {
-            const v = this.huntzones[k];
-            v.base_success = Math.max(0.03, Math.min(0.8, v.base_success + (Math.random() - 0.5) * 0.02));
-            v.population = Math.min(1.0, v.population + v.regen * (1.0 - v.population));
-        }
-        this.t += 1;
-    }
-
-    posFromString(s: string): [number, number] {
-        return s.split(',').map(Number) as [number, number];
+        this.tick++;
     }
     
-    manhattanDist(p1: [number, number], p2: [number, number]): number {
-        return Math.abs(p1[0] - p2[0]) + Math.abs(p1[1] - p2[1]);
+    getState(currentTick: number): DayNightState {
+        this.tick = currentTick;
+        const timeOfDay = (this.tick % DAY_LENGTH) / DAY_LENGTH;
+        const isNight = timeOfDay >= NIGHT_START_RATIO;
+
+        let phase = "Afternoon";
+        if (timeOfDay < 0.25) phase = "Dawn";
+        else if (timeOfDay < 0.5) phase = "Morning";
+        else if (timeOfDay >= NIGHT_START_RATIO && timeOfDay < NIGHT_END_RATIO) phase = "Night";
+        else if (timeOfDay >= NIGHT_END_RATIO) phase = "Late_Night";
+        
+        return {
+            tick: this.tick,
+            day: Math.floor(this.tick / DAY_LENGTH) + 1,
+            phase,
+            isNight,
+            lightLevel: this.getLightLevel(timeOfDay),
+        }
     }
 
-    nearest_nodes(pos: [number, number], node_dict: Record<string, any>, k = 4) {
-        return Object.keys(node_dict)
-            .sort((a, b) => this.manhattanDist(this.posFromString(a), pos) - this.manhattanDist(this.posFromString(b), pos))
-            .slice(0, k);
-    }
-    
-    forage(pos: [number, number], node_pos: [number, number]): [boolean, number, number, number] {
-        const nodeKey = `${node_pos[0]},${node_pos[1]}`;
-        const abundance = this.berries[nodeKey].abundance;
-        const dist = this.manhattanDist(pos, node_pos);
-        const p = 0.6 * abundance + 0.2 * Math.max(0, 1 - dist / 12);
-        const success = Math.random() < p;
-        let food = 0.0;
-        if (success) {
-            this.berries[nodeKey].abundance = Math.max(0.0, this.berries[nodeKey].abundance - randRange(0.2, 0.4));
-            food = randRange(10, 20) * (0.5 + abundance / 2);
+    getLightLevel(time: number): number {
+        if (time < NIGHT_START_RATIO) {
+            const progress = time / NIGHT_START_RATIO;
+            return (Math.sin((progress - 0.5) * Math.PI) + 1) / 2;
+        } else if (time < NIGHT_END_RATIO) {
+            return 0.1;
+        } else {
+            const progress = (time - NIGHT_END_RATIO) / (1.0 - NIGHT_END_RATIO);
+            return progress * 0.3;
         }
-        const risk = 0.05;
-        return [success, food, risk, p];
-    }
-    
-    hunt(pos: [number, number], node_pos: [number, number], injury_factor = 1.0, coop_bonus = 0.0): [boolean, number, number, number] {
-        const nodeKey = `${node_pos[0]},${node_pos[1]}`;
-        const zone = this.huntzones[nodeKey];
-        const base = zone.base_success * zone.population; // Success depends on population
-        const dist = this.manhattanDist(pos, node_pos);
-        let p = base * Math.max(0.15, 1 - dist / 14);
-        p *= injury_factor;
-        p *= (1 + coop_bonus);
-        p = Math.max(0.01, Math.min(0.95, p));
-        const success = Math.random() < p;
-        let food = 0.0;
-        if (success) {
-            food = randRange(20, 45) * (0.5 + base / 2) * (1 + 0.25 * coop_bonus);
-            zone.population = Math.max(0, zone.population - randRange(0.1, 0.25));
-        }
-        const risk = zone.danger * (0.9 + dist / 18);
-        return [success, food, risk, p];
     }
 
-    markHuntZoneUnsafe(node_pos: [number, number], duration: number) {
-        const nodeKey = `${node_pos[0]},${node_pos[1]}`;
-        if(this.huntzones[nodeKey]) {
-            this.huntzones[nodeKey].unsafe_until = this.t + duration;
+    getSleepPressure(time: number): number {
+        if (time >= NIGHT_START_RATIO && time < NIGHT_END_RATIO) {
+            const nightCenter = (NIGHT_START_RATIO + NIGHT_END_RATIO) / 2;
+            const distFromCenter = Math.abs(time - nightCenter);
+            const maxDist = (NIGHT_END_RATIO - NIGHT_START_RATIO) / 2;
+            return 1.0 - (distFromCenter / maxDist) * 0.5;
         }
+        return 0.1;
+    }
+
+    getActivityCostMultiplier(time: number): number {
+        return 1.0 + (1.0 - this.getLightLevel(time));
+    }
+    
+    getForageSuccessModifier(time: number): number {
+        return 0.3 + this.getLightLevel(time) * 0.7;
     }
 }
+const dayNightCycle = new DayNightCycle();
 
 
-// --- NPC CLASS with SSD Model ---
-class NPCWithSSD implements NPCState {
-    // Basic state
-    name: string;
-    x: number;
-    y: number;
-    hunger = 50.0;
-    fatigue = 30.0;
-    injury = 0.0;
-    alive = true;
-    state = "Idle";
-    log: LogEntry[] = [];
-    preset: NPCPreset;
-
-    // SSD parameters
-    kappa: { [key: string]: number } = { forage: 0.1, hunt: 0.1, rest: 0.1, help: 0.1 };
-    E = 0.0; // Heat
-    T = 0.3; // Temperature
-
-    // Relationships
-    rel: { [key: string]: number } = {};
-    help_debt: { [key: string]: number } = {};
-    
-    // Internal tracking
-    boredom = 0.0;
-    failed_forage_strikes: { [key: string]: number } = {};
-
-    private env: EnvScarce;
-    private roster_ref: { [key: string]: NPCWithSSD };
-
-    // ... (SSD constants)
-    private readonly kappa_min = 0.05;
-    private readonly G0 = 0.5;
-    private readonly g = 0.7;
-    private readonly eta = 0.3;
-    private readonly lambda_forget = 0.02;
-    private readonly rho = 0.1;
-    private readonly alpha = 0.6;
-    private readonly beta_E = 0.15;
-    private readonly Theta0 = 1.0;
-    private readonly a1 = 0.5;
-    private readonly a2 = 0.4;
-    private readonly h0 = 0.2;
-    private readonly gamma = 0.8;
-    private readonly T0 = 0.3;
-    private readonly c1 = 0.5;
-    private readonly c2 = 0.6;
-    private readonly TH_H = 55.0;
-    private readonly TH_F = 70.0;
-
-
-    constructor(name: string, preset: NPCPreset, env: EnvScarce, roster_ref: { [key: string]: NPCWithSSD }, start_pos: [number, number]) {
-        this.name = name;
-        this.preset = preset;
-        this.env = env;
-        this.roster_ref = roster_ref;
-        [this.x, this.y] = start_pos;
+// --- Environment Logic ---
+const initializeEnvironment = (): Environment => {
+    const env: Environment = [];
+    for (let y = 0; y < ENV_SIZE; y++) {
+        const row = [];
+        for (let x = 0; x < ENV_SIZE; x++) {
+            row.push({
+                food: 20 + Math.random() * 40,
+                danger: Math.random() * 50,
+                explored: {},
+            });
+        }
+        env.push(row);
     }
+    // Add some richer patches
+    for(let i=0; i<7; i++){
+        const x = Math.floor(Math.random() * ENV_SIZE);
+        const y = Math.floor(Math.random() * ENV_SIZE);
+        env[y][x].food = 60 + Math.random() * 40;
+    }
+    return env;
+};
+
+const updateEnvironment = (env: Environment): Environment => {
+    return env.map(row => row.map(cell => ({
+        ...cell,
+        food: Math.min(100, cell.food + 0.1) // Slow regen
+    })));
+};
+
+// --- NPC Initialization ---
+const initializeNPCs = (): NPCState[] => {
+    return Object.keys(NPC_PRESETS).map(name => {
+        const preset = NPC_PRESETS[name];
+        return {
+            name,
+            preset,
+            alive: true,
+            hunger: Math.random() * 20,
+            fatigue: Math.random() * 20,
+            injury: 0,
+            x: Math.floor(ENV_SIZE / 2 + (Math.random() - 0.5) * 8),
+            y: Math.floor(ENV_SIZE / 2 + (Math.random() - 0.5) * 8),
+            goal: 'explore',
+            path: [],
+            memory: {},
+            relationships: {},
+            E: 0.0,
+            T: 0.3,
+            is_sleeping: false,
+            sleep_debt: 0.0,
+            kappa: { forage: 0.1, rest: 0.1, help: 0.1 },
+            boredom: 0.0,
+        };
+    });
+};
+
+export const initializeSimulation = (): SimulationState => {
+    return {
+        npcs: initializeNPCs(),
+        env: initializeEnvironment(),
+        log: [{ t: 0, name: 'System', action: 'Simulation Started' }],
+        tick: 0,
+        dayNight: dayNightCycle.getState(0),
+    };
+};
+
+// --- NPC Update Logic ---
+// This is a complex class-like structure translated to functional helpers
+const NPC_LOGIC = {
+    TH_H: 55.0,
+    TH_F: 70.0,
     
-    // --- Core SSD & State Update Methods ---
-    private alignment_flow = (action_type: string, meaning_pressure: number) => (this.G0 + this.g * this.kappa[action_type]) * meaning_pressure;
-    private update_kappa = (action_type: string, success: boolean, reward: number) => {
-        const kappa = this.kappa[action_type];
-        const work = success ? this.eta * reward : -this.rho * (kappa ** 2);
-        const decay = this.lambda_forget * (kappa - this.kappa_min);
-        this.kappa[action_type] = Math.max(this.kappa_min, kappa + work - decay);
-    };
-    private update_heat = (meaning_pressure: number, processed_amount: number) => {
+    // SSD Model constants
+    G0: 0.5, g: 0.7, eta: 0.3, lambda_forget: 0.02, rho: 0.1, alpha: 0.6, beta_E: 0.15,
+    Theta0: 1.0, a1: 0.5, a2: 0.4, h0: 0.2, gamma: 0.8,
+    T0: 0.3, c1: 0.5, c2: 0.6,
+
+    updateKappa(npc: NPCState, action_type: string, success: boolean, reward: number): NPCState {
+        const kappa_min = 0.05;
+        const kappa_val = npc.kappa[action_type] || kappa_min;
+        const work = success ? this.eta * reward : -this.rho * (kappa_val ** 2);
+        const decay = this.lambda_forget * (kappa_val - kappa_min);
+        npc.kappa[action_type] = Math.max(kappa_min, kappa_val + work - decay);
+        return npc;
+    },
+
+    updateHeat(npc: NPCState, meaning_pressure: number, processed_amount: number): NPCState {
         const unprocessed = Math.max(0, meaning_pressure - processed_amount);
-        this.E += this.alpha * unprocessed - this.beta_E * this.E;
-        this.E = Math.max(0, this.E);
-    };
-     private check_leap = (): [boolean, number, number] => {
-        const mean_kappa = Object.keys(this.kappa).length > 0 ? Object.values(this.kappa).reduce((s, v) => s + v, 0) / Object.keys(this.kappa).length : 0.1;
-        const fatigue_factor = this.fatigue / 100.0;
+        npc.E += this.alpha * unprocessed - this.beta_E * npc.E;
+        npc.E = Math.max(0, npc.E);
+        return npc;
+    },
+    
+    checkLeap(npc: NPCState): [boolean, number, number] {
+        const kappa_values = Object.values(npc.kappa);
+        const mean_kappa = kappa_values.length > 0 ? kappa_values.reduce((a,b)=>a+b,0) / kappa_values.length : 0.1;
+        const fatigue_factor = npc.fatigue / 100.0;
         const Theta = this.Theta0 + this.a1 * mean_kappa - this.a2 * fatigue_factor;
-        const h = this.h0 * Math.exp((this.E - Theta) / this.gamma);
+        const h = this.h0 * Math.exp((npc.E - Theta) / this.gamma);
         const jump_prob = 1 - Math.exp(-h * 1.0);
         return [Math.random() < jump_prob, h, Theta];
-    };
-    private update_temperature = () => {
-        const kappa_values = Object.values(this.kappa);
-        const entropy = kappa_values.length > 1 ? Math.sqrt(kappa_values.reduce((s, v) => s + (v - (kappa_values.reduce((a, b) => a + b, 0) / kappa_values.length)) ** 2, 0) / (kappa_values.length -1)) : 0.5;
-        this.T = this.T0 + this.c1 * this.E - this.c2 * entropy;
-        this.T = Math.max(0.1, Math.min(1.0, this.T));
-    };
+    },
 
-    // --- Social & Movement ---
-    pos = (): [number, number] => [this.x, this.y];
-    dist_to = (o: NPCWithSSD) => Math.abs(this.x - o.x) + Math.abs(this.y - o.y);
-    move_towards = (target: [number, number]) => {
-        this.x += Math.sign(target[0] - this.x);
-        this.y += Math.sign(target[1] - this.y);
-    };
-    nearby_allies = (radius = 3) => Object.values(this.roster_ref).filter(o => o.name !== this.name && o.alive && this.dist_to(o) <= radius);
+    updateTemperature(npc: NPCState): NPCState {
+        const kappa_values = Object.values(npc.kappa);
+        const entropy = kappa_values.length > 1 ? (Math.max(...kappa_values) - Math.min(...kappa_values)) : 0.5;
+        npc.T = this.T0 + this.c1 * npc.E - this.c2 * entropy;
+        npc.T = Math.max(0.1, Math.min(1.0, npc.T));
+        return npc;
+    },
+    
+    getPersonalSleepPressure(npc: NPCState, dayNight: DayNightState): number {
+        const timeOfDay = (dayNight.tick % DAY_LENGTH) / DAY_LENGTH;
+        const env_pressure = dayNightCycle.getSleepPressure(timeOfDay);
+        const debt_pressure = Math.min(1.0, npc.sleep_debt / 100);
+        const fatigue_pressure = Math.min(1.0, npc.fatigue / 100);
+        return (env_pressure * 0.5 + debt_pressure * 0.3 + fatigue_pressure * 0.2);
+    },
 
-    // --- Decision Logic ---
-    private help_utility(o: NPCWithSSD) {
-        const need = Math.max(0, (o.hunger - 55) / 40) + Math.max(0, (o.injury - 15) / 50) + Math.max(0, (o.fatigue - 70) / 50);
-        const base = 0.35 * this.preset.empathy + 0.4 * (this.rel[o.name] || 0) + 0.35 * (this.help_debt[o.name] || 0);
-        const myneed = Math.max(0, (this.hunger - 55) / 40) + Math.max(0, (this.injury - 15) / 50) + Math.max(0, (this.fatigue - 70) / 50);
-        return need * base - 0.4 * myneed;
-    }
-
-    private maybe_help(t: number): boolean {
-         const allies = this.nearby_allies(5);
-        if (!allies.length) return false;
-        
-        const best_target = allies.reduce((best, o) => {
-            const u = this.help_utility(o);
-            return u > (best ? best.u : 0) ? { o, u } : best;
-        }, null as { o: NPCWithSSD, u: number } | null);
-        
-        if (best_target && best_target.u > 0.15) {
-            const target = best_target.o;
-            if (this.hunger < 85 && target.hunger > 75) {
-                const delta = 25.0;
-                this.hunger += 6.0;
-                target.hunger = Math.max(0.0, target.hunger - delta);
-                this.rel[target.name] = (this.rel[target.name] || 0) + 0.08;
-                target.rel[this.name] = (target.rel[this.name] || 0) + 0.04;
-                target.help_debt[this.name] = (target.help_debt[this.name] || 0) + 0.2;
-                this.update_kappa("help", true, delta * 0.5);
-                this.log.push({ t, name: this.name, state: "Help", action: "share_food", target: target.name, amount: delta, hunger: this.hunger, fatigue: this.fatigue, injury: this.injury, E: this.E, T: this.T, kappa_help: this.kappa.help });
-                return true;
-            } else if (target.injury > 30 || target.fatigue > 85) {
-                target.fatigue = Math.max(0, target.fatigue - 28.0 * (1 + 0.2 * this.preset.stamina));
-                target.injury = Math.max(0, target.injury - 7.0);
-                this.fatigue += 6.0;
-                this.rel[target.name] = (this.rel[target.name] || 0) + 0.1;
-                target.rel[this.name] = (target.rel[this.name] || 0) + 0.05;
-                target.help_debt[this.name] = (target.help_debt[this.name] || 0) + 0.25;
-                this.update_kappa("help", true, 20.0);
-                this.log.push({ t, name: this.name, state: "Help", action: "tend_wounds", target: target.name, hunger: this.hunger, fatigue: this.fatigue, injury: this.injury, E: this.E, T: this.T, kappa_help: this.kappa.help });
-                return true;
-            }
-        }
+    shouldSleep(npc: NPCState, dayNight: DayNightState): boolean {
+        if (npc.is_sleeping) return true;
+        if (npc.sleep_debt > 150) return true;
+        if (npc.fatigue > 90) return true;
+        if (dayNight.isNight && npc.fatigue > 60) return true;
+        const pressure = this.getPersonalSleepPressure(npc, dayNight);
+        if (pressure > 0.7 && npc.hunger < 85) return true;
         return false;
-    }
+    },
     
-    // --- Main Step Function ---
-    step(t: number) {
-        if (!this.alive) return;
+    processSleep(npc: NPCState, dayNight: DayNightState, log: LogEntry[], tick: number): {npc: NPCState, log: LogEntry[]} {
+        const timeBonus = dayNight.isNight ? 1.5 : 1.0;
+        const recovery = 6.0 * timeBonus * (1 + 0.2 * npc.preset.stamina);
+        
+        npc.fatigue = Math.max(0, npc.fatigue - recovery);
+        npc.injury = Math.max(0, npc.injury - 2.0 * timeBonus);
+        npc.hunger = Math.min(120, npc.hunger + 0.5);
+        npc.E = Math.max(0, npc.E - 0.3 * timeBonus);
+        npc.sleep_debt = Math.max(0, npc.sleep_debt - 4.0 * timeBonus);
 
-        // Metabolism
-        this.hunger = Math.min(120, this.hunger + 1.8);
-        this.fatigue = Math.min(120, this.fatigue + 0.8);
-        this.injury = Math.min(120, this.injury + 0.02 * this.fatigue / 100);
-
-        // Death check
-        if (this.hunger >= 100 || this.injury >= 100) {
-            const [leap_occurred, h, Theta] = this.check_leap();
-            if (leap_occurred || this.hunger >= 110 || this.injury >= 110) {
-                this.alive = false;
-                this.log.push({ t, name: this.name, state: "Dead", action: "death", hunger: this.hunger, fatigue: this.fatigue, injury: this.injury, E: this.E, jump_rate: h, Theta: Theta });
-                return;
+        let wake_reason: string | null = null;
+        if (!dayNight.isNight && npc.fatigue < 30 && npc.sleep_debt < 40) wake_reason = "natural";
+        if (npc.hunger > 95) wake_reason = "hunger_emergency";
+        
+        if (wake_reason) {
+            npc.is_sleeping = false;
+            log.push({t: tick, name: npc.name, action: 'wake_up', wake_reason, time_of_day: dayNight.phase });
+            if (wake_reason === 'natural') {
+                npc.T = this.T0;
+                npc.boredom = 0.0;
             }
         }
-        
-        this.update_temperature();
-        if (this.maybe_help(t)) return;
+        return {npc, log};
+    },
+};
 
-        // Rest
-        if (this.fatigue > this.TH_F && this.hunger < this.TH_H * 0.9) {
-            const rest_amount = 30 * (1 + 0.25 * this.preset.stamina);
-            this.fatigue = Math.max(0, this.fatigue - rest_amount);
-            this.hunger += 6;
-            this.injury = Math.max(0, this.injury - 4 * (1 + 0.1 * this.preset.stamina));
-            this.update_kappa("rest", true, rest_amount);
-            this.update_heat(0.8, rest_amount / 30);
-            this.log.push({ t, name: this.name, state: "Sleep", action: "sleep", amount: rest_amount, hunger: this.hunger, fatigue: this.fatigue, injury: this.injury, E: this.E, T: this.T, kappa_rest: this.kappa.rest });
-            return;
+const stepNPC = (
+    npc: NPCState,
+    currentState: SimulationState
+): { npc: NPCState, env: Environment, log: LogEntry[] } => {
+    let { env, log, tick, dayNight, npcs } = currentState;
+    
+    // --- SLEEPING ---
+    if (npc.is_sleeping) {
+        const res = NPC_LOGIC.processSleep(npc, dayNight, [], tick);
+        return { npc: res.npc, env, log: res.log };
+    }
+
+    // --- METABOLISM ---
+    const timeOfDay = (tick % DAY_LENGTH) / DAY_LENGTH;
+    const costMult = dayNightCycle.getActivityCostMultiplier(timeOfDay);
+    npc.hunger = Math.min(120, npc.hunger + 1.8 * costMult);
+    npc.fatigue = Math.min(120, npc.fatigue + 0.8 * costMult);
+    npc.sleep_debt = Math.min(200, npc.sleep_debt + 1.5);
+
+    // --- DEATH CHECK ---
+    if (npc.hunger >= 100 || npc.injury >= 100) {
+        const [leap] = NPC_LOGIC.checkLeap(npc);
+        if (leap || npc.hunger >= 110 || npc.injury >= 110) {
+            npc.alive = false;
+            log.push({ t: tick, name: npc.name, action: 'death', details: npc.hunger >= 100 ? 'starvation' : 'injury', time_of_day: dayNight.phase });
+            return { npc, env, log: [] };
         }
+    }
+    
+    // --- SLEEP DECISION ---
+    if (NPC_LOGIC.shouldSleep(npc, dayNight)) {
+        npc.is_sleeping = true;
+        log.push({t: tick, name: npc.name, action: 'sleep_start', time_of_day: dayNight.phase, sleep_debt: npc.sleep_debt});
+        return {npc, env, log: []};
+    }
 
-        // Forage/Hunt
-        if (this.hunger > this.TH_H) {
-            const meaning_p = (this.hunger - this.TH_H) / (100 - this.TH_H);
-            
-            // Utility calculation for best action
-            const forage_utility = (node_key: string) => {
-                const node_pos = this.env.posFromString(node_key);
-                const dist = this.env.manhattanDist(this.pos(), node_pos);
-                if ((this.failed_forage_strikes[node_key] || 0) >= 3) return -99;
-                return this.env.berries[node_key].abundance * 40 - dist * 1.5;
-            };
-            const hunt_utility = (node_key: string) => {
-                const node_pos = this.env.posFromString(node_key);
-                const dist = this.env.manhattanDist(this.pos(), node_pos);
-                const zone = this.env.huntzones[node_key];
-                if (zone.unsafe_until > this.env.t) return -99;
-                const coop_bonus = this.nearby_allies(3).length * 0.3;
-                return (zone.base_success * zone.population * 60) * (1 - zone.danger * 0.7) * (1 + coop_bonus) * this.preset.risk_tolerance - dist * 1.5;
-            };
-
-            const best_forage = this.env.nearest_nodes(this.pos(), this.env.berries, 4).reduce((best, key) => {
-                const u = forage_utility(key);
-                return u > best.u ? { key, u } : best;
-            }, { key: null as string | null, u: -Infinity });
-
-            const best_hunt = this.env.nearest_nodes(this.pos(), this.env.huntzones, 3).reduce((best, key) => {
-                const u = hunt_utility(key);
-                return u > best.u ? { key, u } : best;
-            }, { key: null as string | null, u: -Infinity });
-
-
-            if (best_forage.u > best_hunt.u && best_forage.key) {
-                const node_pos = this.env.posFromString(best_forage.key);
-                this.move_towards(node_pos);
-                const [success, food, risk, p] = this.env.forage(this.pos(), node_pos);
-                
-                if (success) {
-                    this.hunger = Math.max(0, this.hunger - food);
-                    this.update_kappa("forage", true, food);
-                    this.failed_forage_strikes[best_forage.key] = 0;
-                     this.log.push({ t, name: this.name, state: "Food", action: "eat_success", amount: food, hunger: this.hunger, fatigue: this.fatigue, injury: this.injury, E: this.E, T: this.T, kappa_forage: this.kappa.forage });
-                } else {
-                    this.update_kappa("forage", false, 0);
-                    this.failed_forage_strikes[best_forage.key] = (this.failed_forage_strikes[best_forage.key] || 0) + 1;
-                    this.log.push({ t, name: this.name, state: "Food", action: "eat_fail", hunger: this.hunger, fatigue: this.fatigue, injury: this.injury, E: this.E, T: this.T, kappa_forage: this.kappa.forage });
-                }
-                this.update_heat(meaning_p, this.alignment_flow("forage", meaning_p));
-            } else if (best_hunt.key) {
-                const node_pos = this.env.posFromString(best_hunt.key);
-                this.move_towards(node_pos);
-                const coop_bonus = this.nearby_allies(3).length * 0.3;
-                const injury_factor = 1.0 - (this.injury / 120);
-                const [success, food, risk, p] = this.env.hunt(this.pos(), node_pos, injury_factor, coop_bonus);
-                if (success) {
-                    this.hunger = Math.max(0, this.hunger - food);
-                    this.update_kappa("hunt", true, food);
-                    this.log.push({ t, name: this.name, state: "Hunt", action: "hunt_success", amount: food, hunger: this.hunger, fatigue: this.fatigue, injury: this.injury, E: this.E, T: this.T, kappa_hunt: this.kappa.hunt });
-                } else {
-                    this.update_kappa("hunt", false, 0);
-                    if (Math.random() < risk) {
-                        const dmg = randRange(5, 25);
-                        this.injury = Math.min(100, this.injury + dmg);
-                        this.env.markHuntZoneUnsafe(node_pos, randInt(10, 20));
+    npc = NPC_LOGIC.updateTemperature(npc);
+    
+    // --- NIGHT AVOIDANCE ---
+    if (dayNight.isNight && npc.preset.avoidance > 0.5 && Math.random() < 0.7) {
+        log.push({ t: tick, name: npc.name, action: 'night_rest', time_of_day: dayNight.phase });
+        return { npc, env, log: [] };
+    }
+    
+    // --- FORAGE ---
+    if (npc.hunger > NPC_LOGIC.TH_H) {
+        // Simple search for food
+        let best_cell: {x:number, y:number, food:number} | null = null;
+        for(let dx=-2; dx<=2; dx++) {
+            for(let dy=-2; dy<=2; dy++) {
+                const nx = npc.x + dx;
+                const ny = npc.y + dy;
+                if(nx >=0 && nx < ENV_SIZE && ny >=0 && ny < ENV_SIZE) {
+                    if(!best_cell || env[ny][nx].food > best_cell.food) {
+                        best_cell = {x:nx, y:ny, food: env[ny][nx].food};
                     }
-                    this.log.push({ t, name: this.name, state: "Hunt", action: "hunt_fail", hunger: this.hunger, fatigue: this.fatigue, injury: this.injury, E: this.E, T: this.T, kappa_hunt: this.kappa.hunt });
                 }
-                this.update_heat(meaning_p, this.alignment_flow("hunt", meaning_p));
+            }
+        }
+
+        if (best_cell && best_cell.food > 5) {
+            npc.x = best_cell.x;
+            npc.y = best_cell.y;
+
+            const forageMod = dayNightCycle.getForageSuccessModifier(timeOfDay);
+            if (Math.random() < forageMod) {
+                 const eaten = Math.min(env[npc.y][npc.x].food, 25);
+                 npc.hunger -= eaten;
+                 env[npc.y][npc.x].food -= eaten;
+                 npc = NPC_LOGIC.updateKappa(npc, 'forage', true, eaten);
+                 log.push({t:tick, name:npc.name, action: 'eat_success', amount: eaten, time_of_day: dayNight.phase});
             } else {
-                 this.state = 'Explore';
-                 this.move_towards([randInt(0, ENV_SIZE), randInt(0, ENV_SIZE)]);
-                 this.update_heat(meaning_p, 0);
-                 this.log.push({t, name: this.name, state: "Explore", action: "explore", hunger: this.hunger, fatigue: this.fatigue, injury: this.injury, E: this.E, T: this.T});
+                 npc = NPC_LOGIC.updateKappa(npc, 'forage', false, 0);
+                 log.push({t:tick, name:npc.name, action: 'eat_fail', time_of_day: dayNight.phase});
             }
-            return;
+        } else {
+            // Patrol if no food nearby
+             const moveX = Math.floor(Math.random() * 3) - 1;
+             const moveY = Math.floor(Math.random() * 3) - 1;
+             npc.x = Math.max(0, Math.min(ENV_SIZE - 1, npc.x + moveX));
+             npc.y = Math.max(0, Math.min(ENV_SIZE - 1, npc.y + moveY));
         }
-
-        // Patrol
-        this.state = 'Patrol';
-        const move_range = Math.floor(this.T * 3);
-        this.x = Math.max(0, Math.min(ENV_SIZE - 1, this.x + randInt(-move_range, move_range + 1)));
-        this.y = Math.max(0, Math.min(ENV_SIZE - 1, this.y + randInt(-move_range, move_range + 1)));
-        this.boredom += 0.05;
-        this.update_heat(this.boredom * 0.1, 0);
-        this.log.push({ t, name: this.name, state: "Patrol", action: "patrol", hunger: this.hunger, fatigue: this.fatigue, injury: this.injury, E: this.E, T: this.T, boredom: this.boredom });
+    // --- PATROL ---
+    } else {
+        const moveRange = Math.round(npc.T * 2);
+        const moveX = Math.floor(Math.random() * (2*moveRange+1)) - moveRange;
+        const moveY = Math.floor(Math.random() * (2*moveRange+1)) - moveRange;
+        npc.x = Math.max(0, Math.min(ENV_SIZE - 1, npc.x + moveX));
+        npc.y = Math.max(0, Math.min(ENV_SIZE - 1, npc.y + moveY));
+        npc.boredom += 0.05;
+        npc = NPC_LOGIC.updateHeat(npc, npc.boredom * 0.1, 0);
+        log.push({t:tick, name:npc.name, action: 'patrol', time_of_day: dayNight.phase});
     }
-}
+
+    return { npc, env, log: [] };
+};
 
 
-// --- SIMULATION SERVICE ---
-export class SimulationService {
-    public env!: EnvScarce;
-    public roster!: { [key: string]: NPCWithSSD };
-    public npcs!: NPCWithSSD[];
+// Main update function
+export const updateSimulation = (currentState: SimulationState): SimulationState => {
+    const { tick } = currentState;
+    const newTick = tick + 1;
+    const newLog: LogEntry[] = [];
     
-    constructor() {
-        this.reset();
-    }
+    let newEnv = updateEnvironment(currentState.env);
 
-    reset() {
-        this.env = new EnvScarce();
-        this.roster = {};
-        const center: [number, number] = [Math.floor(ENV_SIZE / 2), Math.floor(ENV_SIZE / 2)];
-        const starts: [number, number][] = [
-            [center[0] - 2, center[1]],
-            [center[0] + 2, center[1] - 1],
-            [center[0], center[1] + 2],
-            [center[0] - 1, center[1] - 2],
-            [center[0] + 1, center[1] + 1]
-        ];
+    const updatedNpcs = currentState.npcs.map(npc => {
+        if (!npc.alive) return npc;
+        const result = stepNPC(npc, { ...currentState, env: newEnv });
+        newEnv = result.env;
+        newLog.push(...result.log);
+        return result.npc;
+    });
 
-        let i = 0;
-        for (const name in NPC_PRESETS) {
-            this.roster[name] = new NPCWithSSD(name, NPC_PRESETS[name], this.env, this.roster, starts[i % starts.length]);
-            i++;
-        }
-        
-        this.npcs = Object.values(this.roster);
-        
-        return {
-            initialNpcs: this.npcs,
-            initialEnv: { berries: this.env.berries, huntZones: this.env.huntzones }
-        };
-    }
-
-    runTick(tick: number): { updatedNpcs: NPCState[], newLogEntries: LogEntry[], updatedEnv: { berries: Record<string, Berry>, huntZones: Record<string, HuntZone> } } {
-        const allNewLogs: LogEntry[] = [];
-        
-        for (const npc of this.npcs) {
-            const initialLogLength = npc.log.length;
-            npc.step(tick);
-            // Capture logs generated only in this step
-            if (npc.log.length > initialLogLength) {
-                allNewLogs.push(...npc.log.slice(initialLogLength));
-            }
-        }
-        this.env.step();
-
-        return {
-            updatedNpcs: this.npcs,
-            newLogEntries: allNewLogs,
-            updatedEnv: {
-                berries: { ...this.env.berries },
-                huntZones: { ...this.env.huntzones }
-            }
-        };
-    }
-}
+    return {
+        ...currentState,
+        npcs: updatedNpcs,
+        env: newEnv,
+        log: [...currentState.log, ...newLog.map(l => ({ ...l, t: newTick }))],
+        tick: newTick,
+        dayNight: dayNightCycle.getState(newTick),
+    };
+};

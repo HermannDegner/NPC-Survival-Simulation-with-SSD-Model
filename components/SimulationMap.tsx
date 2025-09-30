@@ -1,64 +1,65 @@
 import React from 'react';
-import type { NPCState, Berry, HuntZone } from '../types';
+import type { Environment, NPCState, DayNightState } from '../types';
 import { ENV_SIZE } from '../constants';
 
 interface SimulationMapProps {
+    env: Environment;
     npcs: NPCState[];
-    berries: Record<string, Berry>;
-    huntZones: Record<string, HuntZone>;
+    dayNight: DayNightState;
 }
 
-const NPC_ICON_MAP: { [key: string]: string } = {
-    "Forager_A": "A",
-    "Tracker_B": "B",
-    "Pioneer_C": "C",
-    "Guardian_D": "D",
-    "Scavenger_E": "E",
-};
+const SimulationMap: React.FC<SimulationMapProps> = ({ env, npcs, dayNight }) => {
 
-const SimulationMap: React.FC<SimulationMapProps> = ({ npcs, berries, huntZones }) => {
-    
-    const posToString = (x: number, y: number) => `${x},${y}`;
+    const getBgColor = (food: number, danger: number) => {
+        const green = Math.min(255, 50 + food * 2);
+        const red = Math.min(255, 50 + danger * 4);
+        return `rgb(${red}, ${green}, 50)`;
+    };
 
     return (
-        <div className="bg-gray-800 p-4 rounded-lg shadow-lg">
-             <h2 className="text-xl font-bold mb-3 text-cyan-300">Environment Map</h2>
-            <div className="grid border-gray-700 border-t border-l" style={{ gridTemplateColumns: `repeat(${ENV_SIZE}, minmax(0, 1fr))` }}>
-                {Array.from({ length: ENV_SIZE }, (_, y) =>
-                    Array.from({ length: ENV_SIZE }, (_, x) => {
-                        const key = `${x}-${y}`;
-                        const posKey = posToString(x,y);
-                        
-                        const npc = npcs.find(n => n.alive && n.x === x && n.y === y);
-                        const berry = berries[posKey];
-                        const huntZone = huntZones[posKey];
-                        
-                        let cellContent = null;
-                        if (npc) {
-                            cellContent = (
-                                <div title={npc.name} className={`w-full h-full flex items-center justify-center font-bold text-lg ${npc.preset.color}`}>
-                                    {NPC_ICON_MAP[npc.name]?.charAt(0) || '?'}
-                                </div>
-                            );
-                        } else if (berry) {
-                            cellContent = <div title="Berry Patch" className="w-3/5 h-3/5 bg-pink-500 rounded-full" style={{opacity: berry.abundance > 0.2 ? 1 : 0.3}}></div>;
-                        } else if (huntZone) {
-                             cellContent = <div title="Hunt Zone" className="w-4/5 h-4/5 border-2 border-red-500" style={{opacity: huntZone.population > 0.2 ? 1 : 0.3, borderColor: huntZone.unsafe_until > 0 ? 'yellow' : 'rgb(239 68 68)'}}></div>;
-                        }
-                        
-                        return (
-                            <div key={key} className="aspect-square bg-gray-900/50 border-r border-b border-gray-700 flex items-center justify-center">
-                                {cellContent}
-                            </div>
-                        );
-                    })
+        <div className="bg-gray-800 p-4 rounded-lg shadow-lg relative aspect-square">
+            <div 
+                className="grid bg-gray-900/50"
+                style={{
+                    gridTemplateColumns: `repeat(${ENV_SIZE}, minmax(0, 1fr))`,
+                    gridTemplateRows: `repeat(${ENV_SIZE}, minmax(0, 1fr))`,
+                    width: '100%',
+                    height: '100%',
+                }}
+            >
+                {env.map((row, y) =>
+                    row.map((cell, x) => (
+                        <div
+                            key={`${x}-${y}`}
+                            className="border border-gray-700/50"
+                            style={{ backgroundColor: getBgColor(cell.food, cell.danger) }}
+                        ></div>
+                    ))
                 )}
             </div>
-             <div className="text-xs text-gray-400 mt-2 grid grid-cols-3 gap-x-2">
-                <div><span className="font-bold text-white">A-E</span> = NPC</div>
-                <div className="flex items-center"><div className="w-3 h-3 bg-pink-500 rounded-full mr-1.5"></div> Berry (Dim=Depleted)</div>
-                <div className="flex items-center"><div className="w-3 h-3 border-2 border-red-500 mr-1.5"></div> Hunt (Yellow=Unsafe)</div>
-            </div>
+            {/* Day/Night Overlay */}
+            <div 
+                className="absolute top-0 left-0 w-full h-full pointer-events-none transition-colors duration-1000"
+                style={{
+                    backgroundColor: `rgba(25, 25, 112, ${0.7 * (1 - dayNight.lightLevel)})`,
+                    mixBlendMode: 'multiply'
+                }}
+            ></div>
+
+            {npcs.filter(npc => npc.alive).map(npc => (
+                <div
+                    key={npc.name}
+                    className={`absolute w-4 h-4 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-500 ease-in-out transform -translate-x-1/2 -translate-y-1/2 border-2 border-white/50`}
+                    style={{
+                        left: `${(npc.x + 0.5) / ENV_SIZE * 100}%`,
+                        top: `${(npc.y + 0.5) / ENV_SIZE * 100}%`,
+                        backgroundColor: 'rgba(50,50,50,0.7)'
+                    }}
+                    title={npc.name}
+                >
+                    <span className={npc.preset.color}>{npc.name.split('_')[1]}</span>
+                </div>
+            ))}
         </div>
     );
 };

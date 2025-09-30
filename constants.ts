@@ -1,7 +1,8 @@
 
 import type { NPCPreset } from './types';
 
-export const TICKS = 200;
+export const TICKS = 240; // 5 days
+export const DAY_LENGTH = 48;
 export const ENV_SIZE = 26;
 
 export const NPC_PRESETS: { [key: string]: NPCPreset } = {
